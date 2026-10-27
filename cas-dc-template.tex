@@ -1,4 +1,6 @@
 \documentclass[a4paper,fleqn]{cas-dc}
+\usepackage{graphicx}
+\usepackage{float}
 %\documentclass[a4paper,fleqn,longmktitle]{cas-dc}
 \usepackage[numbers]{natbib}
 %\usepackage[authoryear]{natbib}
@@ -42,6 +44,7 @@
 % Here goes the abstract
 \begin{abstract}
 In this work we demonstrate $a_b$ the formation Y\_1 of a new type of polariton on the interface between a cuprous oxide slab and a polystyrene micro-sphere placed on the slab. The evanescent field of the resonant whispering gallery mode of the micro sphere has a substantial gradient, and therefore effectively couples with the quadrupole $1^S$ excitons in cuprous oxide. This evanescent polariton has a long life-time, which is determined only by its excitonic and component. The polariton lower branch has a well pronounced minimum. This suggests that this excitation is localized and can be utilized for possible. The spatial coherence of the polariton can be improved by assembling the micro-spheres into a linear chain.
+The polariton lower branch has a well pronounced minimum. This suggests that this excitation is localized and can be utilized for possible. The spatial coherence of the polariton can be improved by assembling the micro-spheres into a linear chain.
 \end{abstract}
 
 % Use if graphical abstract is present
@@ -66,78 +69,16 @@ keyword-3
 
 \maketitle
 
-% Main text
-\section{Introduction}
-% 长期地图需要历史能力
-%         ↓
-% 现有方法只维护当前状态，或历史存储不可扩展
-%         ↓
-% 3DGS 的拓扑变化使普通 snapshot/diff 失效
-%         ↓
-% 核心思想：逻辑完整版本 + 物理共享存储
-%         ↓
-% VersionGS：identity + history construction + archive + replay
-%         ↓
-% 实验与贡献
+\input{section/1_introduction.tex}
 
+\input{section/2_RelatedWork.tex}
 
-% 研究问题：
+\input{section/3_Method.tex}
 
-% 如何把一张持续被优化、增删和重排的 3D Gaussian 地图，转化为可长期保存、随机访问、精确回放且存储可扩展的历史资产？
+\input{section/4_ExperimentsAndResults.tex}
 
-% 最关键的定位是：
+\input{section/5_DiscussionandLimitations.tex}
 
-% VersionGS 不是一种新的动态场景重建方法，而是一种面向 evolving 3D Gaussian maps 的版本化表示与归档机制。
-
-% 一句最能概括论文的核心 insight 是：
-
-% Every version is logically complete, but physically shared.
-% 每个历史版本在逻辑上都是完整、可独立渲染的地图，在物理存储上则通过稳定 Gaussian 身份和内容寻址块共享未变化部分。
-
-
-\textbf{Paragraph 1 — Motivation}
-
-% 三维高斯泼溅（3D Gaussian Splatting，3DGS）凭借高真实感的场景重建能力和高效的渲染性能，逐渐成为三维环境表示的重要方法。基于3DGS构建的地图能够较为完整地保留场景的空间结构与外观细节，为机器人环境感知、增强现实交互等应用提供了直观场景信息。
-3D Gaussian Splatting (3DGS) has gradually become an important method for 3D environment representation, thanks to its high-fidelity scene reconstruction capability and efficient rendering performance. Maps constructed based on 3DGS can relatively fully preserve the spatial structure and appearance details of the scene, providing intuitive scene information for applications such as robot environmental perception and augmented reality interaction.
-
-%然而，物体可能在不同时间被添加、移除或重新摆放，光照、布局及局部外观也可能随之改变，例如，例如椅子，会经常在屋子里挪动。更重要的是，这些变化往往发生在系统未对场景进行观测期间，因而难以被及时、完整地记录。如果建图系统仅根据最新观测更新并覆盖原有地图，虽然可以维持对当前环境的描述，却容易丢失场景的历史状态及其变化过程，难以满足长期应用中的回溯与分析需求。
-However, objects may be added, removed, or rearranged over time, while lighting, layout, and local appearance may also change. For example, chairs are often moved around a room. More importantly, these changes often occur while the system is not observing the scene, making them difficult to record promptly and completely. If a mapping system updates the map solely from the latest observations and overwrites the previous version, it may continue to describe the current environment but risks losing the scene’s historical states and the process of change. This makes it difficult to meet the needs of long-term applications for retrospective review and analysis.
-
-% 因此，面向长期运行的3DGS建图系统不仅要准确维护当前场景，还应有效保存不同时间的历史地图状态，并建立各版本之间的联系。在持续适应当前环境变化的同时，系统还应支持历史场景查询、旧版本恢复、算法更新后的回归测试以及场景变化过程追溯，从而完整保留3DGS地图随时间演化的信息，为其在动态环境中的长期可靠应用提供基础。
-Therefore, a 3DGS mapping system designed for long-term operation should not only maintain an accurate representation of the current scene, but also preserve historical map states and link different versions. While adapting continuously to changes in the environment, the system should support querying past scenes, restoring previous versions, regression testing after algorithm updates, and tracing how the scene has changed. In this way, it can preserve the evolution of 3DGS maps over time and provide a foundation for their reliable, long-term use in dynamic environments.
-
-
-Paragraph 2 — Gap
-Recent Gaussian mapping systems can adapt a scene representation to new observations, while dynamic and continual representations model temporal changes through local updates, deformation, or replay. However, most methods prioritize the current state: old geometry is overwritten or removed as the map evolves. Saving a complete Gaussian model after every update provides history but incurs storage that grows linearly with the number of versions. Delta-based recovery reduces redundancy, but typically relies on stable parameter correspondence and sequential replay, assumptions that are fragile for evolving 3D Gaussian maps.
-
-Paragraph 3 — Technical challenges
-Versioning a 3D Gaussian map is fundamentally complicated by its changing topology. Densification, splitting, cloning, pruning, and scene removal continuously alter both the number and ordering of Gaussian primitives, making tensor rows unsuitable as persistent identities. Moreover, continued optimization may modify Gaussians in unchanged regions, so parameter differences do not directly correspond to physical scene changes. Finally, constraining the live model to preserve old parameters can impair adaptation to the current scene. The challenge is thus to preserve immutable historical states without restricting live optimization or redundantly storing every optimized model.
-
-Paragraph 4 — Method insight
-We present VersionGS, a versioned archive and replay framework for evolving 3D Gaussian maps. VersionGS separates the mutable live map from an immutable sequence of render-state commits. It assigns persistent identities and lifecycle metadata to Gaussian primitives, allowing them to be aligned across topology-changing updates. At each commit, VersionGS constructs a historical state from the previous commit and the current live map: new and confirmed changed content uses current parameters, while unchanged content may retain its previous parameters, subject to visibility and rendering-quality constraints. Each resulting version is represented by a complete manifest over stable UID ranges, while identical parameter blocks are shared through lossless content-addressed storage.
-
-Paragraph 5 — Replay and results
-This design makes every commit logically complete yet physically shared. An arbitrary historical version can be directly loaded and rendered from its manifest without the original RGB-D sequence, optimizer state, or sequential application of intermediate deltas. Experiments on [datasets] and sequences containing up to [T] versions demonstrate that VersionGS [latest-quality result], [historical-fidelity result], and [storage/latency result].
-
-
-
-
-% 推荐使用的总览句：
-
-VersionGS turns a continuously optimized Gaussian map into a sequence of immutable render-state commits: each commit is logically complete, while unchanged content is physically shared across versions.
- Our contributions are threefold:
-\begin{enumerate}
-  \item We formulate versioned Gaussian mapping, in which a continually updated 3D Gaussian map must retain immutable and randomly accessible historical render states under topology-changing updates.
-  \item We introduce persistent Gaussian identities and a change-aware history construction method that reconciles previous commits with the live map using change evidence, visibility, and rendering-quality constraints.
-  \item We develop a lossless multi-version archive based on complete commit manifests and content-addressed UID blocks, enabling dataset-independent direct replay of arbitrary versions without storing optimizer states or replaying the mapping process.
-\end{enumerate}
-\section{Section-2}
-
-Text of section-2 \cite{NewmanGirvan2004}.
-
-\section{Section-3}
-
-Text of section-3 \cite{Vehlowetal2013}.
 
 
 

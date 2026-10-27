@@ -1,0 +1,177 @@
+% Main text
+\section{Introduction}
+% 长期地图需要历史能力
+%         ↓
+% 现有方法只维护当前状态，或历史存储不可扩展
+%         ↓
+% 3DGS 的拓扑变化使普通 snapshot/diff 失效
+%         ↓
+% 核心思想：逻辑完整版本 + 物理共享存储
+%         ↓
+% VersionGS：identity + history construction + archive + replay
+%         ↓
+% 实验与贡献
+
+
+% 研究问题：
+
+% 如何把一张持续被优化、增删和重排的 3D Gaussian 地图，转化为可长期保存、随机访问、精确回放且存储可扩展的历史资产？
+
+% 最关键的定位是：
+
+% VersionGS 不是一种新的动态场景重建方法，而是一种面向 evolving 3D Gaussian maps 的版本化表示与归档机制。
+
+% 一句最能概括论文的核心 insight 是：
+
+% Every version is logically complete, but physically shared.
+% 每个历史版本在逻辑上都是完整、可独立渲染的地图，在物理存储上则通过稳定 Gaussian 身份和内容寻址块共享未变化部分。
+
+
+\textbf{Paragraph 1 — Motivation}
+
+% 三维高斯泼溅（3D Gaussian Splatting，3DGS）凭借高真实感的场景重建能力和高效的渲染性能，逐渐成为三维环境表示的重要方法。基于3DGS构建的地图能够较为完整地保留场景的空间结构与外观细节，为机器人环境感知、增强现实交互等应用提供了直观场景信息。
+3D Gaussian Splatting (3DGS) has gradually become an important method for 3D environment representation, thanks to its high-fidelity scene reconstruction capability and efficient rendering performance. Maps constructed based on 3DGS can relatively fully preserve the spatial structure and appearance details of the scene, providing intuitive scene information for applications such as robot environmental perception and augmented reality interaction.
+
+%然而，物体可能在不同时间被添加、移除或重新摆放，光照、布局及局部外观也可能随之改变，例如，例如椅子，会经常在屋子里挪动。更重要的是，这些变化往往发生在系统未对场景进行观测期间，因而难以被及时、完整地记录。如果建图系统仅根据最新观测更新并覆盖原有地图，虽然可以维持对当前环境的描述，却容易丢失场景的历史状态及其变化过程，难以满足长期应用中的回溯与分析需求。
+However, objects may be added, removed, or rearranged over time, while lighting, layout, and local appearance may also change. For example, chairs are often moved around a room. More importantly, these changes often occur while the system is not observing the scene, making them difficult to record promptly and completely. If a mapping system updates the map solely from the latest observations and overwrites the previous version, it may continue to describe the current environment but risks losing the scene’s historical states and the process of change. This makes it difficult to meet the needs of long-term applications for retrospective review and analysis.
+
+% % 因此，面向长期运行的3DGS建图系统不仅要准确维护当前场景，还应有效保存不同时间的历史地图状态，并建立各版本之间的联系。在持续适应当前环境变化的同时，系统还应支持历史场景查询、旧版本恢复、算法更新后的回归测试以及场景变化过程追溯，从而完整保留3DGS地图随时间演化的信息，为其在动态环境中的长期可靠应用提供基础。
+% Therefore, a 3DGS mapping system designed for long-term operation should not only maintain an accurate representation of the current scene, but also preserve historical map states and link different versions. While adapting continuously to changes in the environment, the system should support querying past scenes, restoring previous versions, regression testing after algorithm updates, and tracing how the scene has changed. In this way, it can preserve the evolution of 3DGS maps over time and provide a foundation for their reliable, long-term use in dynamic environments.
+
+
+\textbf{Paragraph 2 — Gap}
+
+% 面向持续演化的 3D 地图，现有研究可归纳为三类：在线地图适应、时序场景表示与模型状态存储。
+% GaME 等在线建图方法通过增量添加新几何、移除过时 Gaussian 以及抑制旧观测的影响，维持当前地图与新观测之间的一致性，但通常不保留不可变的历史状态。
+% 持续学习方法进一步支持历史访问：CL-Splats 利用局部更新实现历史恢复，GaussianUpdate 和 LTGS 分别通过可见性感知模型和共享对象模板保存时序信息。然而，这些历史访问机制依附于特定更新规则或共享时序表示，没有明确将归档渲染状态与后续优化解耦。
+% 动态 Gaussian 方法虽然能查询不同时间，但时间可查询性本身不保证已提交状态在新观测加入后仍保持不变。完整独立快照能精确保留各个状态，却带来随版本累积的存储；朴素 tensor delta 需要跨版本参数对齐，串行 delta chain 则还带来恢复依赖。
+% 因此，在 Gaussian 拓扑持续变化时，同时支持当前更新、不可变历史、跨版本共享存储和直接回放，仍是值得研究的问题。
+
+For the continuously evolving 3D maps, existing research can be classified into three categories: online map adaptation, temporal scene representation, and model state storage.
+Online mappers such as GaME~\cite{yugay2026game} keep the map up to date
+by adding new geometry, removing outdated Gaussians, and ignoring stale
+observations. However, they do not preserve previous map versions.
+Continual methods provide additional support for scene history. 
+CL-Splats~\cite{ackermann2025clsplats} recovers past states by recording
+local changes, while GaussianUpdate~\cite{zeng2025gaussianupdate} and
+LTGS~\cite{kim2026ltgs} represent past scenes using Gaussian visibility
+and shared object templates, respectively.
+These methods preserve scene history, but recovering past states depends
+on their specific update rules or shared scene models.
+They do not provide a general way to save fixed map versions that remain
+unchanged during later optimization.
+
+Meanwhile, dynamic Gaussian representations model motion through
+persistent trajectories or time-conditioned
+deformations~\cite{luiten2024dynamic,wu2024gaussians}.
+Although they support rendering at different timestamps, temporal
+queryability alone does not ensure that previously committed states
+remain unchanged as new observations are incorporated.
+Finally, independently storing full snapshots preserves each state
+exactly but incurs storage proportional to the sum of their sizes.
+Naive tensor-wise deltas require parameter correspondence, which
+Gaussian insertion, pruning, and reordering disrupt; uncheckpointed
+delta chains additionally require traversing intervening updates to
+recover a target version.
+
+These approaches have improved scene updates and historical rendering, but preserving and accessing past versions efficiently remains challenging. 
+Existing methods do not fully address how to update a map while keeping past versions unchanged, storing them efficiently, and replaying them directly.
+
+
+\textbf{Paragraph 3 — Technical challenges}
+
+% 保存完整的3D高斯图映射副本十分简单。  
+% 难点在于如何在不同版本之间共享未更改的内容，同时允许当前地图持续优化改进。  
+
+% 首先，高斯图默认情况下并不具有稳定的标识。  
+% 密度提升通过克隆和分割创建新的高斯图，而剪枝和场景删除则会删除现有高斯图。  
+% 这些操作会改变高斯图的数量和顺序，因此同一张张量行在不同版本中可能指向不同的高斯图。  
+
+% 其次，参数变化并不一定意味着场景发生了变化。  
+% 持续优化可以在场景未改变的情况下调整高斯图的位置、形状和颜色。  
+% 因此，仅仅存储所有参数差异也记录了优化的变更，从而减少了可共享的内容量。  
+
+% 第三，保留共享参数可能会与优化当前地图产生冲突。  
+% 冻结现有高斯图使其参数易于重复使用，但可能阻止其适应新的观测数据。  
+% 允许所有高斯图发生变化则为映射器提供了更多自由度，但也可能导致原本未改变的场景内容生成新的副本。  
+
+% 因此，关键挑战在于追踪更新过程中的高斯图。
+% 并决定哪些先前的参数可以被重复使用，而不会降低新版本的质量。
+
+Saving a full copy of a 3D Gaussian map is straightforward.
+The challenge is to share unchanged content across versions while
+allowing the current map to keep improving.
+\textbf{First,} Gaussians do not have stable identities by default.
+Densification creates new Gaussians through cloning and splitting,
+while pruning and scene removal delete existing ones.
+These operations change the number and ordering of Gaussians,
+so the same tensor row may refer to different Gaussians across versions.
+\textbf{Second,} parameter changes do not necessarily indicate scene changes.
+Continued optimization can adjust the positions, shapes, and colors
+of Gaussians even where the scene has not changed.
+Simply storing all parameter differences therefore also records
+optimization changes, reducing how much content can be shared.
+\textbf{Third,} preserving shared parameters can conflict with improving
+the current map.
+Freezing existing Gaussians makes their parameters easy to reuse,
+but can prevent them from adapting to new observations.
+Allowing all Gaussians to change gives the mapper more freedom,
+but can create new copies of otherwise unchanged scene content.
+The key challenge is therefore to track Gaussians across updates
+and decide which previous parameters can be reused without
+reducing the quality of the new version.
+
+\textbf{Paragraph 4 — Method insight}
+
+% 为应对这些挑战，我们提出了VersionGS框架，用于存档和回放不断演化的3D高斯地图。  
+% VersionGS将正在优化的地图与其保存的版本分开，从而确保后续更新不会影响早期的提交记录。  
+% 每个高斯函数都会获得一个持久的ID，使其在更新过程中仍能被追踪，即使其张量行发生变化。  
+% 在创建新版本时，VersionGS会利用检测到的场景变化和可见性信息，决定从当前地图中采用哪些参数，以及从先前版本中复用哪些参数。  
+% 已确认发生更改的新高斯函数和区域将使用当前参数。对于其他区域，VersionGS尽可能复用先前的参数，并通过检查渲染质量来限制复用带来的影响。  
+% 每个版本随后以一组完整的高斯参数块引用列表形式保存。  
+% 相同的参数块仅存储一次，并在多个版本间共享，而所有存储的参数均完整保留，无任何丢失。  
+% 这使得任何已保存的版本均可直接加载并渲染，无需依赖原始观测数据或回放中间更新。
+
+
+
+To address these challenges, we present VersionGS, a framework for
+archiving and replaying evolving 3D Gaussian maps.
+VersionGS separates the map being optimized from its saved versions,
+so later updates do not alter earlier commits.
+Each Gaussian receives a persistent ID, allowing it to be tracked
+across updates even when its tensor row changes.
+When creating a new version, VersionGS uses detected scene changes
+and visibility to decide which parameters to take from the current
+map and which to reuse from the previous version.
+New Gaussians and regions with confirmed changes use current parameters.
+For other regions, VersionGS reuses previous parameters where possible
+and checks rendering quality to limit the effect of reuse.
+Each version is then saved as a complete list of references to
+Gaussian parameter blocks.
+Identical blocks are stored only once and shared across versions,
+while all stored parameters are preserved without loss.
+This allows any saved version to be loaded and rendered directly,
+without the original observations or replaying intermediate updates.
+
+
+\textbf{Paragraph 5 — Replay and results}
+We evaluate VersionGS on [datasets] across [number] successive map
+versions.
+Our experiments measure the rendering quality of both current and
+historical maps, total archive storage, and the time needed to save
+and load a version.
+We compare against full snapshots, compressed snapshots, and
+delta-based storage to separate the benefits of compression
+from those of cross-version sharing.
+VersionGS reduces archive storage by [X] compared with [baseline],
+while keeping current-map quality within [Y] dB of the underlying mapper.
+We also verify that saved parameters are recovered exactly and that
+historical versions remain unchanged after further map updates.
+
+
+ Our contributions are threefold:
+\begin{enumerate}
+  \item We formulate versioned Gaussian mapping, in which a continually updated 3D Gaussian map must retain immutable and randomly accessible historical render states under topology-changing updates.
+  \item We introduce persistent Gaussian identities and a change-aware history construction method that reconciles previous commits with the live map using change evidence, visibility, and rendering-quality constraints.
+  \item We develop a lossless multi-version archive based on complete commit manifests and content-addressed UID blocks, enabling dataset-independent direct replay of arbitrary versions without storing optimizer states or replaying the mapping process.
+\end{enumerate}
