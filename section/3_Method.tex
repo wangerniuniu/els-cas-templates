@@ -1,1 +1,574 @@
+
 \section{Method}
+
+\subsection{Problem Setup and Overview}
+\label{sec:problem_setup}
+
+
+3D Gaussian Splatting (3DGS) is an effective approach for 3D scene representation and novel view synthesis. In the method proposed by Kerbl et al., a static scene is reconstructed using a set of 3D Gaussians initialized from sparse points obtained through Structure-from-Motion (SfM) and subsequently optimized via differentiable rendering with multi-view supervision.
+It represents the scene as a set of Gaussian primitives,
+$\mathcal{G}=\{g_i\}_{i=1}^{N}$, where each Gaussian has parameters
+\begin{equation}
+    \boldsymbol{\theta}_i =
+    (\boldsymbol{\mu}_i,\boldsymbol{s}_i,\boldsymbol{q}_i,
+    \alpha_i,\boldsymbol{h}_i).
+\end{equation}
+Here, $\boldsymbol{\mu}_i$ is the position,
+$\boldsymbol{s}_i$ and $\boldsymbol{q}_i$ describe its scale and rotation,
+$\alpha_i$ is the opacity, and $\boldsymbol{h}_i$ contains spherical
+harmonic coefficients for view-dependent color.
+A differentiable renderer projects these Gaussians into an image,
+and their parameters are optimized to match the input observations.
+During training, densification and pruning also change the number
+of Gaussians.
+
+In an evolving environment, a single fixed reconstruction is no
+longer sufficient.
+New observations may reveal added, removed, or rearranged objects,
+requiring both Gaussian parameters and the set of primitives to change.
+We consider a stream of posed RGB-D observations,
+\begin{equation}
+    \mathcal{O} =
+    \{(I_t,D_t,T_t,K_t)\}_{t=1}^{T},
+\end{equation}
+where $I_t$ and $D_t$ are the RGB and depth images,
+$T_t$ is the camera pose, and $K_t$ contains the camera intrinsics.
+An online mapper processes these observations to maintain a live map
+that reflects the latest observed scene.
+Our goal is to preserve a sequence of renderable map versions
+while allowing this live map to continue updating.
+
+We distinguish the live map $\mathcal{L}_k$ from the committed map
+$\mathcal{C}_k$ at the $k$-th commit.
+The live map remains available for further optimization,
+whereas a committed map stays unchanged after it is saved.
+The index $k$ denotes a chosen commit point, such as the end of a
+capture session, rather than the time when a physical scene change
+occurred.
+A committed map need not be an identical copy of the live map:
+it may reuse parameters from the previous commit when doing so
+keeps rendering quality within a chosen tolerance.
+This reduces storage caused by parameter changes in otherwise
+unchanged parts of the scene.
+
+VersionGS constructs each new commit from the current live map
+and the previous committed map:
+\begin{equation}
+    \mathcal{C}_k =
+    \operatorname{Build}
+    (\mathcal{L}_k,\mathcal{C}_{k-1},\mathcal{E}_k,\mathcal{V}_k),
+\end{equation}
+where $\mathcal{E}_k$ contains detected scene-change evidence
+since the previous commit, and $\mathcal{V}_k$ contains observations
+used to check visibility and rendering quality.
+The first commit is taken directly from the live map.
+For later commits, persistent Gaussian IDs establish correspondence
+across versions.
+Change evidence, visibility, and quality checks then determine
+which previous parameters can be reused.
+
+Finally, VersionGS stores each commit as a complete list of references
+to Gaussian parameter blocks.
+Identical blocks are shared across versions and stored without loss.
+Given a commit index $k$ and a camera specification $\pi$,
+the archive restores $\mathcal{C}_k$ and renders
+\begin{equation}
+    (\hat{I},\hat{D},\hat{A})
+    = \mathcal{R}(\mathcal{C}_k,\pi),
+\end{equation}
+where $\hat{I}$, $\hat{D}$, and $\hat{A}$ are the rendered color,
+depth, and opacity.
+Replay requires neither the original RGB-D observations nor
+the application of intermediate updates.
+The archive preserves the committed parameters exactly;
+the quality tolerance applies only when constructing a commit
+from the live map.
+
+\subsection{Persistent Gaussian Identities}
+\label{sec:gaussian_identities}
+
+Standard 3DGS stores Gaussian parameters as rows in tensors.
+These row indices are useful during optimization, but cannot reliably
+identify Gaussians across map versions.
+Adding or removing a Gaussian changes the tensor layout, while
+densification creates new primitives through cloning and splitting.
+As a result, the same row index may refer to different Gaussians
+in different versions.
+We therefore assign each Gaussian a persistent ID that is independent
+of its tensor row and parameter values.
+
+\paragraph{ID assignment.}
+Each newly created Gaussian receives a unique integer ID, $u$.
+IDs are assigned in increasing order and are never reused.
+We represent a versioned Gaussian as
+\begin{equation}
+    g_u =
+    (u,\boldsymbol{\theta}_u,p_u,\boldsymbol{r}_u,b_u),
+\end{equation}
+where $\boldsymbol{\theta}_u$ contains its rendering parameters,
+$p_u$ is its parent ID, $\boldsymbol{r}_u$ is a region label,
+and $b_u$ is its creation commit index.
+The ID remains fixed as the Gaussian's position, shape, opacity,
+and color are optimized.
+All identity fields are stored alongside the parameter tensors
+and undergo the same row insertions, removals, and reorderings.
+
+\paragraph{Creation and removal.}
+Gaussians initialized from newly observed geometry receive fresh IDs
+and have no parent, denoted by $p_u=-1$.
+Cloning and splitting also assign fresh IDs to the generated Gaussians,
+with their parent IDs pointing to the source Gaussian.
+Thus, a child records its origin without being treated as the same
+primitive as its parent.
+When a Gaussian is removed, we record its ID, retirement commit,
+and removal reason.
+These reasons distinguish scene removal from operations such as
+densification and opacity-based pruning.
+Removing a Gaussian from the live map does not alter any previously
+saved commit.
+
+\paragraph{Region labels.}
+We use a coarse region label to associate Gaussians with detected
+scene changes.
+For a Gaussian created directly from an observation, the label is
+assigned from its initial position:
+\begin{equation}
+    \boldsymbol{r}_u =
+    \left\lfloor
+    \frac{\boldsymbol{\mu}_u^{\mathrm{birth}}}{\ell}
+    \right\rfloor,
+\end{equation}
+where $\ell$ is the grid cell size and the floor operation is applied
+to each coordinate.
+Gaussians produced by cloning or splitting inherit the source
+Gaussian's region label.
+This label remains fixed during later optimization.
+It groups related primitives for change-aware version construction;
+it is neither a semantic object label nor a continuously updated
+spatial index.
+
+\paragraph{Cross-version correspondence.}
+Let $U_k^{\mathrm{live}}$ and $U_{k-1}^{\mathrm{commit}}$ denote the
+Gaussian IDs in the current live map and the previous commit.
+Their intersection identifies primitives present in both states:
+\begin{equation}
+    U_k^{\mathrm{shared}}
+    =
+    U_k^{\mathrm{live}}
+    \cap U_{k-1}^{\mathrm{commit}}.
+\end{equation}
+IDs found only in the live map identify new primitives, while IDs
+found only in the previous commit identify primitives no longer
+present in the live map.
+This correspondence allows us to retrieve previous parameters
+even when tensor layouts differ.
+A shared ID does not imply unchanged parameters or an unchanged
+physical scene.
+In the next section, we use scene-change evidence, visibility,
+and rendering-quality checks to decide whether those previous
+parameters can be reused.
+
+
+\subsection{Change-Aware Version Construction}
+\label{sec:version_construction}
+
+Persistent IDs establish correspondence across versions, but a shared
+ID does not tell us whether its previous parameters are still suitable.
+A Gaussian may have changed because the scene changed, or simply
+because optimization refined its parameters.
+We therefore construct each new commit using both scene-change evidence
+and rendering-quality checks.
+The process starts from the current live map and selectively replaces
+parameters with those from the previous commit.
+It operates on a separate candidate map and leaves the live parameters
+unchanged.
+
+\paragraph{Change evidence and visibility.}
+Let $U_k^{\mathrm{live}}$ and $U_{k-1}^{\mathrm{commit}}$ be the ID sets
+of the current live map and the previous commit.
+We collect the region labels associated with detected changes since
+the previous commit into a set $\mathcal{Q}_k$.
+For each current Gaussian $u$, we define a change flag
+\begin{equation}
+    c_u = \mathbb{1}[\boldsymbol{r}_u \in \mathcal{Q}_k].
+\end{equation}
+A positive flag means that the Gaussian belongs to a region supported
+by change evidence.
+The absence of this flag does not establish that the region is unchanged.
+
+We also render the live map from selected observations in
+$\mathcal{V}_k$.
+A Gaussian is marked as visible if the renderer reports it as visible
+in at least one of these views:
+\begin{equation}
+    v_u =
+    \mathbb{1}\!\left[
+        u \text{ is visible in any selected view}
+    \right].
+\end{equation}
+This flag describes visibility in the selected observations,
+rather than in all possible views.
+
+\paragraph{Initial candidate.}
+We initialize a candidate map $\widetilde{\mathcal{C}}_k$
+from the live map $\mathcal{L}_k$.
+New Gaussians and Gaussians in regions with detected changes retain
+their current parameters.
+For Gaussians present in both states, we initially reuse previous
+parameters only when they are not visible and have no change flag:
+\begin{equation}
+    \widetilde{\boldsymbol{\theta}}_{u,k}
+    =
+    \begin{cases}
+        \boldsymbol{\theta}_{u,k-1}^{\mathrm{commit}},
+        & u \in U_{k-1}^{\mathrm{commit}},\
+          c_u=0,\ v_u=0,\\[2pt]
+        \boldsymbol{\theta}_{u,k}^{\mathrm{live}},
+        & \text{otherwise}.
+    \end{cases}
+    \label{eq:initial_version}
+\end{equation}
+The candidate contains the same Gaussian IDs as the live map:
+\begin{equation}
+    U_k^{\mathrm{candidate}} = U_k^{\mathrm{live}}.
+\end{equation}
+Gaussians that exist only in the previous commit are therefore not
+added back to the new version.
+They remain available through their earlier commits.
+Reusing parameters in currently invisible regions is an initial
+choice; the complete candidate must still pass the quality check below.
+
+\paragraph{Testing reuse in visible regions.}
+Visible Gaussians without detected changes may also be able to reuse
+previous parameters.
+We collect these candidates as
+\begin{equation}
+    \mathcal{S}_k =
+    \left\{
+        u \in
+        U_k^{\mathrm{live}} \cap U_{k-1}^{\mathrm{commit}}
+        \;\middle|\;
+        c_u=0,\ v_u=1
+    \right\}.
+\end{equation}
+To avoid testing every Gaussian separately, we group eligible IDs
+by the fixed UID intervals used by the archive.
+Within each group, we measure the largest absolute parameter difference
+between the live and previous states.
+We test groups with smaller differences first and limit the number
+of trials to control commit time.
+
+For each trial, we replace the eligible Gaussians' parameters in
+the current candidate with their previous values.
+This produces a trial map $\mathcal{C}'_k$.
+We accept the replacement only if its rendering quality stays within
+the allowed degradation relative to the live map.
+Otherwise, we undo the replacement.
+Accepted replacements remain in the candidate during later trials,
+so each check accounts for the combined effect of reuse.
+
+\paragraph{Rendering-quality check.}
+For each checking view $j$, we render both $\mathcal{L}_k$ and
+$\mathcal{C}'_k$ and compare them with the observed RGB-D image.
+We measure degradation using PSNR, SSIM, and depth mean absolute error:
+\begin{align}
+    d_j^{P}
+    &=
+    \operatorname{PSNR}_j(\mathcal{L}_k)
+    -
+    \operatorname{PSNR}_j(\mathcal{C}'_k),\\
+    d_j^{S}
+    &=
+    \operatorname{SSIM}_j(\mathcal{L}_k)
+    -
+    \operatorname{SSIM}_j(\mathcal{C}'_k),\\
+    d_j^{D}
+    &=
+    \operatorname{MAE}_j(\mathcal{C}'_k)
+    -
+    \operatorname{MAE}_j(\mathcal{L}_k).
+\end{align}
+Depth error is measured in meters over valid observed depth pixels.
+For all three metrics, a positive difference indicates worse quality.
+
+We use bootstrap resampling of the per-view differences to make
+the decision less dependent on their mean alone.
+Let $U_{.95}(d)$ denote the 95th percentile of the resampled means.
+A trial passes when
+\begin{equation}
+    \begin{aligned}
+        U_{.95}(d^{P}) &\leq \epsilon_P,\\
+        U_{.95}(d^{S}) &\leq \epsilon_S,\\
+        U_{.95}(d^{D}) &\leq \epsilon_D,
+    \end{aligned}
+    \label{eq:reuse_quality}
+\end{equation}
+where $\epsilon_P$, $\epsilon_S$, and $\epsilon_D$ are the allowed
+quality drops.
+Every trial is compared with the original live map, rather than
+the previous trial.
+This prevents successive replacements from each consuming a new
+quality allowance.
+The check provides empirical control on the selected observations;
+it does not guarantee the same bound at unseen viewpoints.
+
+\paragraph{Final commit.}
+After the trials, we check the complete candidate using
+Eq.~\eqref{eq:reuse_quality}.
+If it passes, we use it as the new committed map.
+Otherwise, we fall back to the live map:
+\begin{equation}
+    \mathcal{C}_k =
+    \begin{cases}
+        \widetilde{\mathcal{C}}_k,
+        & \text{if the final candidate passes},\\
+        \mathcal{L}_k,
+        & \text{otherwise}.
+    \end{cases}
+\end{equation}
+The first commit is taken directly from the live map because no
+previous version is available.
+Once constructed, $\mathcal{C}_k$ is stored without loss and remains
+fixed during later mapping.
+Reusing previous parameters creates opportunities for exact block
+sharing, which we describe next.
+
+\subsection{Shared Archive and Direct Replay}
+\label{sec:archive_replay}
+
+After constructing a committed map $\mathcal{C}_k$, we store it
+in a shared archive.
+Each commit describes a complete renderable map, while identical
+parameter blocks are stored only once.
+This separates the logical map version from its physical storage:
+loading a version requires its block references, rather than
+a sequence of changes from other versions.
+
+\paragraph{Blocks based on persistent IDs.}
+Splitting parameter tensors by row index can reduce sharing when
+Gaussians are inserted, removed, or reordered.
+We instead partition each committed map using fixed UID intervals.
+For a block width $B$, interval $b$ contains
+\begin{equation}
+    \mathcal{B}_{k,b}
+    =
+    \left\{
+        g_u \in \mathcal{C}_k
+        \;\middle|\;
+        bB \leq u < (b+1)B
+    \right\}.
+\end{equation}
+Empty intervals are skipped, and Gaussians within each block
+are sorted by UID.
+Thus, moving a Gaussian to a different tensor row does not change
+its block assignment or its order within that block.
+
+Each block stores the Gaussian rendering parameters together with
+their IDs, parent IDs, region labels, and creation commit indices.
+Rendering parameters retain their original float32 values,
+and identity fields are stored as int64 values.
+Global settings, including the spherical harmonic degree,
+are stored in the commit header.
+
+\paragraph{Exact block sharing.}
+We serialize each block in a fixed field order and compute
+a content hash from its raw bytes and UID-range information:
+\begin{equation}
+    h_{k,b}
+    =
+    H\!\left(
+        \operatorname{range}_{k,b}
+        \,\Vert\,
+        \operatorname{bytes}(\mathcal{B}_{k,b})
+    \right),
+\end{equation}
+where $H$ is SHA-256 and $\Vert$ denotes concatenation.
+If the archive already contains this hash, the new commit references
+the existing block.
+Otherwise, we compress the raw bytes using a lossless codec
+and append the new block to the archive.
+An index records each stored block's location and size.
+
+Block sharing requires identical contents, including identity metadata.
+Similar parameters or similar rendered images alone are not sufficient.
+The version construction in Sec.~\ref{sec:version_construction}
+encourages sharing by restoring selected previous parameters.
+However, reusing some Gaussians within a block does not necessarily
+make the whole block identical.
+A block with any remaining content change is stored as a new block.
+
+\paragraph{Complete commit manifests.}
+For each version, we save a manifest containing its header,
+commit metadata, and the complete ordered list of block references:
+\begin{equation}
+    M_k =
+    \left(
+        \operatorname{header}_k,\,
+        \operatorname{metadata}_k,\,
+        [h_{k,1},\ldots,h_{k,n_k}]
+    \right).
+\end{equation}
+Here, $n_k$ is the number of nonempty blocks in the version.
+The manifest also records the parent commit for bookkeeping,
+but loading does not require loading that parent.
+New commits add manifests and previously unseen blocks;
+they do not modify the contents referenced by earlier commits.
+
+The total storage consists of unique compressed blocks,
+commit manifests, and the archive index:
+\begin{equation}
+    S_{\mathrm{archive}}
+    =
+    \sum_{h\in\mathcal{H}} S_{\mathrm{block}}(h)
+    +
+    \sum_k S_{\mathrm{manifest}}(M_k)
+    +
+    S_{\mathrm{index}},
+\end{equation}
+where $\mathcal{H}$ is the set of stored block hashes.
+Unchanged blocks therefore contribute storage only once,
+regardless of how many versions reference them.
+The savings depend on how much block content remains identical
+across commits.
+
+\paragraph{Direct replay.}
+To restore version $k$, we read its manifest, load and decompress
+the referenced blocks, and concatenate their fields in UID order.
+The header supplies the global settings needed to rebuild
+the Gaussian model.
+This recovers the committed parameters and identity metadata exactly,
+without applying intermediate updates.
+The archive contains the rendering state and version metadata,
+but does not require optimizer states, training keyframes,
+or the original RGB-D observations.
+
+Given a camera specification $\pi$, including its pose, intrinsics,
+and image size, the restored map can render color, depth, and opacity:
+\begin{equation}
+    (\hat{I},\hat{D},\hat{A})
+    =
+    \mathcal{R}\!\left(
+        \operatorname{Load}(\mathcal{A},k),\pi
+    \right).
+\end{equation}
+Loading requires reading the blocks of the selected version,
+but does not require traversing its parent commits.
+Its data-loading cost therefore depends on the selected map
+and its compressed blocks, rather than the number of intervening
+map updates.
+
+The archive introduces no quantization or parameter approximation.
+Any quality difference from the live map arises during version
+construction, not during storage or recovery.
+Exact parameter recovery is distinct from bit-exact rendered output,
+which also depends on the renderer and execution environment.
+
+
+\subsection{Mapping and Commit Procedure}
+\label{sec:mapping_procedure}
+
+\paragraph{Live map updates.}
+We use GaME~\cite{yugay2026game} as the mapping backbone.
+Given posed RGB-D observations and instance masks, it selects
+keyframes, adds new geometry, removes outdated Gaussians,
+and masks stale observations during optimization.
+VersionGS maintains Gaussian identities throughout these operations
+and records detected changes for version construction.
+Before removing Gaussians, it records their IDs and region labels.
+Newly created Gaussians receive fresh IDs.
+Camera poses are supplied with the observations.
+
+\paragraph{Keeping reusable parameters stable.}
+After each session commit, we freeze the existing live Gaussians
+to reduce changes in regions without further observation.
+New Gaussians remain trainable.
+During optimization, Gaussians visible in the sampled keyframe
+are unfrozen before backpropagation.
+They remain trainable until the next session commit,
+allowing observed regions to adapt to new information.
+
+Frozen parameters are restored after each optimizer step,
+and their optimizer moments are cleared.
+We exclude frozen Gaussians from routine low-opacity pruning,
+but still allow their removal when supported by scene-change evidence.
+Global densification and opacity resets are skipped while
+frozen Gaussians remain.
+These rules improve parameter stability in the live map.
+Earlier commits remain fixed regardless of which live Gaussians
+are later unfrozen, optimized, or removed.
+
+\paragraph{Creating commits.}
+Algorithm~\ref{alg:versiongs} summarizes the complete procedure.
+At the end of each capture session, we construct a commit from
+the live map, the previous commit, and the accumulated change evidence,
+following Sec.~\ref{sec:version_construction}.
+The first commit is taken directly from the live map.
+Each resulting commit is written to the shared archive described
+in Sec.~\ref{sec:archive_replay}.
+Version construction operates on a separate candidate and does not
+replace the live map.
+
+Session boundaries specify when to save versions;
+they do not indicate when physical changes occurred.
+After the final session, we unfreeze the live map and perform
+global refinement.
+We save the refined map as an additional commit without
+parameter reuse.
+This preserves both the session commits and the final refined result.
+
+
+% In the preamble:
+
+
+\begin{algorithm}[h]
+\caption{VersionGS Mapping and Commit Procedure}
+\label{alg:versiongs}
+\begin{algorithmic}[1]
+\Require Observation sessions $\{\mathcal{O}_k\}_{k=1}^{K}$;
+         checking views $\{\mathcal{V}_k\}_{k=1}^{K}$
+\Ensure Shared archive $\mathcal{A}$ and final live map $\mathcal{L}$
+
+\State $\mathcal{L} \gets \emptyset$
+\State $\mathcal{A} \gets \emptyset$
+\State $\mathcal{C}_{\mathrm{prev}} \gets \varnothing$
+
+\For{$k = 1,\ldots,K$}
+    \State $\mathcal{E}_k \gets \emptyset$
+    \For{observation $o$ in $\mathcal{O}_k$}
+        \If{\Call{IsKeyframe}{$o$}}
+            \State $(\mathcal{L},\mathcal{E}_k)
+                \gets \Call{UpdateLiveMap}
+                {\mathcal{L},o,\mathcal{E}_k}$
+        \EndIf
+    \EndFor
+
+    \If{$\mathcal{C}_{\mathrm{prev}} = \varnothing$}
+        \State $\mathcal{C}_k \gets \Call{Copy}{\mathcal{L}}$
+    \Else
+        \State $\mathcal{C}_k \gets \Call{BuildVersion}
+            {\mathcal{L},\mathcal{C}_{\mathrm{prev}},
+             \mathcal{E}_k,\mathcal{V}_k}$
+    \EndIf
+
+    \State $\mathcal{A} \gets
+        \Call{WriteArchive}{\mathcal{A},\mathcal{C}_k}$
+    \State $\mathcal{C}_{\mathrm{prev}} \gets \mathcal{C}_k$
+    \State \Call{FreezeExistingGaussians}{$\mathcal{L}$}
+\EndFor
+
+\State \Call{UnfreezeAll}{$\mathcal{L}$}
+\State $\mathcal{L} \gets \Call{Refine}{\mathcal{L}}$
+\State $\mathcal{C}_{\mathrm{final}}
+    \gets \Call{Copy}{\mathcal{L}}$
+\State $\mathcal{A} \gets
+    \Call{WriteArchive}{\mathcal{A},\mathcal{C}_{\mathrm{final}}}$
+
+\State \Return $\mathcal{A},\mathcal{L}$
+\end{algorithmic}
+\end{algorithm}
+
+Here, \textsc{UpdateLiveMap} performs GaME updates with persistent
+IDs and the freezing rules described above.
+\textsc{BuildVersion} selects reusable parameters and checks
+rendering quality, while \textsc{WriteArchive} stores the complete
+commit through shared parameter blocks.

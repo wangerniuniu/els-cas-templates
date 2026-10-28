@@ -1,10 +1,46 @@
 \documentclass[a4paper,fleqn]{cas-dc}
 \usepackage{graphicx}
 \usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
 %\documentclass[a4paper,fleqn,longmktitle]{cas-dc}
 \usepackage[numbers]{natbib}
 %\usepackage[authoryear]{natbib}
 %\usepackage[authoryear,longnamesfirst]{natbib}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+
+% Draft result markers.
+\newcommand{\vgsplaceholder}[1]{#1\textsuperscript{P}}
+\newcommand{\vgsreported}{\textsuperscript{R}}
+
+% Figure layout.
+\newlength{\vgsqualwidth}
+\newlength{\vgsqualheight}
+\setlength{\vgsqualheight}{2.15cm}
+
+% Missing images appear as clearly labeled placeholders.
+\newcommand{\vgsqualimage}[1]{%
+    \IfFileExists{#1}{%
+        \includegraphics[
+            width=\vgsqualwidth,
+            height=\vgsqualheight,
+            keepaspectratio
+        ]{#1}%
+    }{%
+        \begingroup
+        \setlength{\fboxsep}{0pt}%
+        \fbox{%
+            \parbox[c][\vgsqualheight][c]
+            {\dimexpr\vgsqualwidth-2\fboxrule\relax}{%
+                \centering
+                \scriptsize Image pending%
+            }%
+        }%
+        \endgroup
+    }%
+}
 
 %%%Author macros
 \def\tsc#1{\csdef{#1}{\textsc{\lowercase{#1}}\xspace}}

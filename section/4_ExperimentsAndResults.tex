@@ -1,1 +1,500 @@
 \section{Experiments and Results}
+\section{Experiments}
+\label{sec:experiments}
+
+We evaluate VersionGS from two perspectives:
+whether versioning preserves the quality of the current map,
+and whether historical maps can be stored efficiently and replayed
+accurately.
+We first compare current-scene rendering with existing Gaussian
+mapping systems.
+Historical fidelity, archive storage, and version loading are
+evaluated separately.
+
+\subsection{Experimental Setup}
+\label{sec:experimental_setup}
+
+\paragraph{Datasets.}
+We evaluate on the synthetic Flat
+dataset~\cite{schmid2022panoptic}
+and the real-world Aria
+dataset~\cite{pan2023ariadigitaltwinnew}.
+Flat contains two RGB-D sequences of the same environment,
+with substantial changes between captures.
+For Aria, we use two rooms with two captures per room.
+These sequences include object additions, removals, and rearrangements.
+They allow us to assess adaptation to the latest observed scene
+and preservation of earlier map versions.
+
+\paragraph{Rendering metrics.}
+We report PSNR, SSIM~\cite{wang2004image},
+and LPIPS~\cite{zhang2018unreasonable}
+for color rendering.
+Depth accuracy is measured by mean absolute error,
+reported as Depth L1 in centimeters.
+Higher PSNR and SSIM indicate better quality,
+while lower LPIPS and depth error indicate better quality.
+We report input-view and novel-view results separately.
+Rendering is evaluated at the dataset evaluation resolution
+using the supplied camera poses.
+
+\paragraph{Mapping baselines.}
+We compare VersionGS with
+SplaTAM~\cite{keetha2024splatam},
+MonoGS~\cite{murai2024monogs},
+DG-SLAM~\cite{xu2024dgslam},
+and GaME~\cite{yugay2026game}.
+SplaTAM and MonoGS provide established Gaussian mapping baselines,
+while DG-SLAM addresses dynamic environments.
+GaME is the mapping backbone of VersionGS and our main reference
+for assessing how versioning affects current-scene quality.
+
+\paragraph{Current-scene evaluation protocol.}
+We follow the GaME protocol for current-scene rendering.
+The captures of each scene are processed in temporal order
+as a continuous RGB-D stream.
+Every tenth frame of the final capture is reserved for
+novel-view evaluation.
+The remaining frames of that capture are available to the mapper
+and are used for input-view evaluation.
+Ground-truth camera poses are supplied to all methods
+to isolate mapping performance from pose estimation.
+
+VersionGS saves session commits and an additional commit after
+final refinement.
+The current-scene tables evaluate the final refined map restored
+from its archive.
+This evaluates the delivered renderable map rather than only
+the model held in memory during training.
+Session commits and their corresponding live maps are evaluated
+separately because parameter reuse can introduce a small quality
+difference during version construction.
+
+\paragraph{Archive checking views.}
+Version construction uses selected RGB-D observations to check
+visibility and rendering quality.
+These observations must be separate from the novel-view test set.
+The final checking-view selection and data split will be reported
+with the completed experiments.
+
+\paragraph{Draft result status.}
+The baseline values in
+Tables~\ref{tab:rendering_flat_dataset}
+and~\ref{tab:rendering_aria_dataset}
+are reproduced from the supplied GaME comparison tables
+and marked with \textsuperscript{R}.
+VersionGS values marked with \textsuperscript{P}
+are illustrative placeholders for manuscript preparation.
+They are not measured results.
+The corresponding numerical analysis is provisional
+and must be replaced after evaluation.
+
+
+\begin{figure*}[t]
+    \centering
+    \setlength{\vgsqualwidth}{0.151\textwidth}
+    \setlength{\tabcolsep}{2pt}
+
+    \begin{tabular}{
+        @{}c
+        *{6}{>{\centering\arraybackslash}m{\vgsqualwidth}}
+        @{}
+    }
+        &
+        \scriptsize SplaTAM &
+        \scriptsize MonoGS &
+        \scriptsize DG-SLAM &
+        \scriptsize GaME &
+        \scriptsize VersionGS &
+        \scriptsize Ground Truth
+        \\[3pt]
+
+        \rotatebox{90}{\small A}
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/ADD_splatam__flat_dataset_run2_287_new.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/ADD_monogs__flat_dataset_run2_286.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/ADD_dgslam__flat_dataset_run2_286.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/ADD_flat_dataset_run2_318.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/versiongs_flat_add.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/ADD_gt_flat_dataset_run2_318.png
+        }
+        \\[4pt]
+
+        \rotatebox{90}{\small B}
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/aria_splatam_0_agent_3_frame_000200.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/aria_monogs_0_agent_3_frame00020.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/aria_dgslam_0_agent_3_frame200.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/aria_render_0_agent_3_frame_000200.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/versiongs_aria_rearrangement.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/aria_gt_0_agent_3_frame_000200.jpg
+        }
+        \\[4pt]
+
+        \rotatebox{90}{\small C}
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/remove_splatam_train_91_new.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/remove_monogs_train_91.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/remove_dgslam_train_91.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/remove_ours_train_91.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/versiongs_flat_rearrangement.png
+        }
+        &
+        \vgsqualimage{
+            figures/qualitative_comparisons/remove_gt_train_91.png
+        }
+        \\
+    \end{tabular}
+
+    \caption{
+        \textbf{Current-scene rendering under scene changes.}
+        The selected cases contain object additions and rearrangements.
+        (A) A black office chair is added.
+        (B) The toy house, chair, and picture are rearranged.
+        (C) The cutlery is replaced, and the painting and chair are moved.
+        GaME and VersionGS are shown separately.
+        VersionGS panels are intended for renders from the restored
+        final commit.
+        Missing images are explicitly shown as placeholders.
+        All panels in the completed comparison must use matched
+        evaluation cameras.
+    }
+    \label{fig:qualitative_results}
+\end{figure*}
+
+
+\subsection{Evolving Scene Mapping Results}
+\label{sec:evolving_mapping_results}
+
+We first examine whether VersionGS preserves current-scene
+rendering quality while adding version storage and replay.
+Tables~\ref{tab:rendering_flat_dataset}
+and~\ref{tab:rendering_aria_dataset}
+compare input-view and novel-view rendering on Flat and Aria.
+The comparison with GaME is particularly important because
+both methods use the same mapping backbone.
+It measures the effect of the additional parameter-management
+rules on the final map.
+
+All metrics are computed over complete images.
+Changed objects often occupy only a small part of a scene,
+so whole-image averages may hide errors near added, removed,
+or rearranged objects.
+We therefore complement the quantitative evaluation with
+the selected regions in Fig.~\ref{fig:qualitative_results}.
+
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{9pt}
+
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Method}
+        & \textbf{PSNR [dB]} $\uparrow$
+        & \textbf{SSIM} $\uparrow$
+        & \textbf{LPIPS} $\downarrow$
+        & \textbf{Depth L1 [cm]} $\downarrow$
+        \\
+        \midrule
+
+        SplaTAM~\cite{keetha2024splatam}\vgsreported
+        & 15.88 / 12.69
+        & 0.484 / 0.299
+        & 0.548 / 0.696
+        & 21.16 / 59.91
+        \\
+
+        MonoGS~\cite{murai2024monogs}\vgsreported
+        & 21.24 / 21.33
+        & 0.771 / 0.769
+        & 0.398 / 0.396
+        & 30.95 / 29.91
+        \\
+
+        DG-SLAM~\cite{xu2024dgslam}\vgsreported
+        & 13.72 / 13.70
+        & 0.586 / 0.603
+        & 0.737 / 0.739
+        & 73.76 / 73.90
+        \\
+
+        GaME~\cite{yugay2026game}\vgsreported
+        & 24.79 / 23.47
+        & 0.899 / 0.880
+        & 0.227 / 0.266
+        & 16.63 / 15.59
+        \\
+
+        \midrule
+
+        VersionGS (Ours)
+        & \vgsplaceholder{25.00 / 23.70}
+        & \vgsplaceholder{0.903 / 0.885}
+        & \vgsplaceholder{0.220 / 0.258}
+        & \vgsplaceholder{16.30 / 15.20}
+        \\
+
+        \bottomrule
+    \end{tabular}%
+    }
+
+    \caption{
+        \textbf{Current-scene rendering on Flat.}
+        Cells report input / novel-view results.
+        VersionGS is evaluated using the final refined map
+        restored from the archive.
+        \textsuperscript{R}: baseline values reproduced from
+        the supplied GaME comparison table.
+        \textsuperscript{P}: illustrative draft values,
+        not measured results.
+    }
+    \label{tab:rendering_flat_dataset}
+\end{table*}
+
+
+\paragraph{Flat.}
+\textit{Provisional analysis based on placeholder values.}
+The draft values illustrate the intended comparison with GaME:
+similar current-map quality while adding versioned storage.
+They correspond to PSNR differences of
++0.21 dB on input views and +0.23 dB on novel views.
+The placeholder SSIM values are also slightly higher,
+while LPIPS and depth errors are lower.
+These values are not experimental evidence.
+If the trend is confirmed under a matched protocol and repeated runs,
+it would support the conclusion that versioning preserves
+current-scene reconstruction quality.
+Ablation studies are needed to determine whether any improvement
+comes from the freezing and unfreezing strategy or other
+implementation differences.
+
+
+\begin{table*}[t]
+    \centering
+    \small
+    \setlength{\tabcolsep}{7pt}
+
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{llcccc}
+        \toprule
+        \textbf{Method}
+        & \textbf{Scene}
+        & \textbf{PSNR [dB]} $\uparrow$
+        & \textbf{SSIM} $\uparrow$
+        & \textbf{LPIPS} $\downarrow$
+        & \textbf{Depth L1 [cm]} $\downarrow$
+        \\
+        \midrule
+
+        SplaTAM~\cite{keetha2024splatam}\vgsreported
+        & room0
+        & --\textsuperscript{$\dagger$} / 16.75
+        & 0.780 / 0.447
+        & 0.239 / 0.444
+        & 4.12 / 17.79
+        \\
+        & room1
+        & 22.94 / 17.90
+        & 0.810 / 0.543
+        & 0.219 / 0.440
+        & 2.84 / 15.90
+        \\
+        & Avg.
+        & 22.37 / 17.33
+        & 0.795 / 0.495
+        & 0.229 / 0.442
+        & 3.48 / 16.80
+        \\
+
+        \midrule
+
+        MonoGS~\cite{murai2024monogs}\vgsreported
+        & room0
+        & 25.28 / 25.19
+        & 0.781 / 0.779
+        & 0.277 / 0.273
+        & 5.15 / 5.09
+        \\
+        & room1
+        & 23.12 / 23.02
+        & 0.844 / 0.842
+        & 0.236 / 0.241
+        & 4.99 / 5.01
+        \\
+        & Avg.
+        & 24.20 / 24.11
+        & 0.813 / 0.811
+        & 0.257 / 0.257
+        & 5.07 / 5.05
+        \\
+
+        \midrule
+
+        DG-SLAM~\cite{xu2024dgslam}\vgsreported
+        & room0
+        & 15.78 / 15.63
+        & 0.578 / 0.580
+        & 0.761 / 0.763
+        & 67.60 / 69.05
+        \\
+        & room1
+        & 12.62 / 12.44
+        & 0.651 / 0.643
+        & 0.702 / 0.708
+        & 55.47 / 57.03
+        \\
+        & Avg.
+        & 14.20 / 14.04
+        & 0.615 / 0.612
+        & 0.732 / 0.736
+        & 61.54 / 63.04
+        \\
+
+        \midrule
+
+        GaME~\cite{yugay2026game}\vgsreported
+        & room0
+        & 28.87 / 28.94
+        & 0.934 / 0.935
+        & 0.166 / 0.166
+        & 2.30 / 2.20
+        \\
+        & room1
+        & 30.83 / 30.54
+        & 0.961 / 0.958
+        & 0.107 / 0.114
+        & 1.80 / 1.90
+        \\
+        & Avg.
+        & 29.85 / 29.74
+        & 0.948 / 0.947
+        & 0.137 / 0.140
+        & 2.05 / 2.05
+        \\
+
+        \midrule
+
+        VersionGS (Ours)
+        & room0
+        & \vgsplaceholder{29.10 / 29.20}
+        & \vgsplaceholder{0.938 / 0.939}
+        & \vgsplaceholder{0.160 / 0.160}
+        & \vgsplaceholder{2.20 / 2.10}
+        \\
+        & room1
+        & \vgsplaceholder{31.10 / 30.80}
+        & \vgsplaceholder{0.965 / 0.962}
+        & \vgsplaceholder{0.100 / 0.108}
+        & \vgsplaceholder{1.70 / 1.80}
+        \\
+        & Avg.
+        & \vgsplaceholder{30.10 / 30.00}
+        & \vgsplaceholder{0.952 / 0.951}
+        & \vgsplaceholder{0.130 / 0.134}
+        & \vgsplaceholder{1.95 / 1.95}
+        \\
+
+        \bottomrule
+    \end{tabular}%
+    }
+
+    \caption{
+        \textbf{Current-scene rendering on Aria.}
+        Cells report input / novel-view results.
+        Avg.\ denotes the mean over the two rooms.
+        \textsuperscript{R}: baseline values reproduced from
+        the supplied GaME comparison table.
+        \textsuperscript{P}: illustrative draft values,
+        not measured results.
+        $\dagger$: the supplied room0 input PSNR is inconsistent
+        with the reported average and is omitted pending verification.
+        The baseline average is retained as supplied.
+    }
+    \label{tab:rendering_aria_dataset}
+\end{table*}
+
+
+\paragraph{Aria.}
+\textit{Provisional analysis based on placeholder values.}
+The draft values show the same intended trend on real-world scenes.
+Relative to the supplied GaME averages,
+the placeholder PSNR differences are
++0.25 dB for input views and +0.26 dB for novel views.
+The corresponding depth-error difference is -0.10 cm
+for both view sets.
+If confirmed experimentally, these results would indicate
+that the versioning mechanisms remain compatible with accurate
+mapping under real sensor noise and scene changes.
+The final discussion will report measured differences and
+variation across repeated runs.
+
+\paragraph{Qualitative comparison.}
+Figure~\ref{fig:qualitative_results}
+organizes the comparison around object additions
+and rearrangements.
+The VersionGS panels must be generated by loading the final commit
+in a separate replay process and rendering the same evaluation
+cameras as the baselines.
+This comparison checks whether the restored map correctly represents
+the latest observed objects and their surroundings.
+The analysis of visual differences will be completed
+once the VersionGS renders are available.
+
+\paragraph{Current quality versus historical preservation.}
+Good rendering of the latest scene does not establish that
+earlier versions have been preserved.
+The current-scene tables therefore address only the compatibility
+of versioning with the mapping backbone.
+Historical rendering, exact parameter recovery, storage savings,
+and loading costs require separate comparisons.
+In particular, archival gains must be measured against
+render-only snapshots with matched parameter precision
+and compression settings.
